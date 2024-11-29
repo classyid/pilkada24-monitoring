@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <title>Data Pemilihan KPU</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-8">
+  <div class="max-w-4xl mx-auto bg-white rounded-lg shadow p-6">
+    <h1 class="text-2xl font-bold mb-6">Data Pemilihan KPU</h1>
+    
+    <!-- Loading Indicator -->
+    <div id="loading" class="hidden">
+      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+    </div>
+
+    <!-- Error Message -->
+    <div id="errorMessage" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4">
+    </div>
+
+    <!-- Dropdown Section -->
+    <div class="space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Provinsi</label>
+        <select id="dropdownLevel1" class="mt-1 block w-full p-2 rounded-md border border-gray-300">
+          <option value="">Pilih Provinsi</option>
+        </select>
+      </div>
+
+      <div id="level2Container" class="hidden">
+        <label class="block text-sm font-medium text-gray-700">Kabupaten/Kota</label>
+        <select id="dropdownLevel2" class="mt-1 block w-full p-2 rounded-md border border-gray-300">
+          <option value="">Pilih Kabupaten/Kota</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Results Section -->
+    <div id="results" class="mt-8 hidden">
+      <h2 class="text-xl font-semibold mb-4">Hasil Pemilihan</h2>
+      
+      <!-- Global Progress -->
+      <div class="bg-gray-50 p-4 rounded-lg mb-4">
+        <h3 class="font-medium mb-2">Progress Global</h3>
+        <div class="flex items-center space-x-4">
+          <div class="flex-grow">
+            <div class="h-4 bg-gray-200 rounded-full">
+              <div id="globalProgressBar" class="h-4 bg-blue-500 rounded-full" style="width: 0%"></div>
+            </div>
+          </div>
+          <span id="globalProgressText" class="text-sm font-medium">0%</span>
+        </div>
+        <div class="mt-2 text-sm text-gray-600">
+          <span id="globalProgressDetail">-</span>
+        </div>
+      </div>
+
+      <!-- Candidates List -->
+      <div id="candidatesList" class="space-y-4">
+        <h3 class="font-medium mb-2">Daftar Paslon</h3>
+        <div id="candidatesGrid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentPaslonData = null;
+    
+    function showError(message) {
+      const errorDiv = document.getElementById('errorMessage');
+      errorDiv.textContent = message;
+      errorDiv.classList.remove('hidden');
+    }
+
+    function hideError() {
+      document.getElementById('errorMessage').classList.add('hidden');
+    }
+
+    function showLoading() {
+      document.getElementById('loading').classList.remove('hidden');
+    }
+
+    function hideLoading() {
+      document.getElementById('loading').classList.add('hidden');
+    }
+
+    function loadLevel1() {
+      showLoading();
+      hideError();
+      
+      google.script.run
+        .withSuccessHandler(function(data) {
+          if (data && Array.isArray(data)) {
+            const dropdown = document.getElementById('dropdownLevel1');
+            data.forEach(item => {
+              const option = new Option(item.nama, item.kode);
+              option.dataset.id = item.id;
+              dropdown.add(option);
+            });
+          } else {
+            showError('Data provinsi tidak valid');
+          }
+          hideLoading();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error loading level 1:', error);
+          showError('Gagal memuat data provinsi: ' + error.message);
+          hideLoading();
+        })
+        .getWilayahData(1);
+    }
+
+    function loadLevel2(provinceCode) {
+      showLoading();
+      hideError();
+      
+      google.script.run
+        .withSuccessHandler(function(data) {
+          if (data && Array.isArray(data)) {
+            const dropdown = document.getElementById('dropdownLevel2');
+            dropdown.innerHTML = '<option value="">Pilih Kabupaten/Kota</option>';
+            
+            data.forEach(item => {
+              const option = new Option(item.nama, item.kode);
+              option.dataset.id = item.id;
+              dropdown.add(option);
+            });
+            
+            document.getElementById('level2Container').classList.remove('hidden');
+          } else {
+            showError('Data kabupaten/kota tidak valid');
+          }
+          hideLoading();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error loading level 2:', error);
+          showError('Gagal memuat data kabupaten/kota: ' + error.message);
+          hideLoading();
+        })
+        .getWilayahLevel2(provinceCode);
+    }
+
+    function loadPaslonDataAndResults(provinceCode) {
+      showLoading();
+      hideError();
+
+      // Load paslon data
+      google.script.run
+        .withSuccessHandler(function(paslonData) {
+          console.log('Paslon data loaded');
+          currentPaslonData = paslonData;
+          
+          // After paslon data is loaded, load hasil data
+          google.script.run
+            .withSuccessHandler(function(hasilData) {
+              console.log('Hasil data loaded');
+              
+              if (hasilData && hasilData.tungsura && hasilData.tungsura.chart) {
+                const progress = hasilData.tungsura.chart.progres;
+                
+                document.getElementById('globalProgressBar').style.width = `${progress.persen}%`;
+                document.getElementById('globalProgressText').textContent = `${progress.persen.toFixed(2)}%`;
+                document.getElementById('globalProgressDetail').textContent = 
+                  `${progress.progres} dari ${progress.total} TPS`;
+                
+                // Update candidates list
+                updateCandidatesList(provinceCode, paslonData, hasilData);
+                
+                document.getElementById('results').classList.remove('hidden');
+              }
+              hideLoading();
+            })
+            .withFailureHandler(function(error) {
+              console.error('Error loading hasil:', error);
+              showError('Gagal memuat hasil: ' + error.message);
+              hideLoading();
+            })
+            .getHasilData(provinceCode);
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error loading paslon:', error);
+          showError('Gagal memuat data paslon: ' + error.message);
+          hideLoading();
+        })
+        .getPaslonData();
+    }
+
+    function updateCandidatesList(provinceCode, paslonData, hasilData) {
+      const candidatesGrid = document.getElementById('candidatesGrid');
+      candidatesGrid.innerHTML = '';
+
+      if (!paslonData || !hasilData?.tungsura?.table) return;
+
+      const regions = hasilData.tungsura.table;
+      
+      Object.keys(regions).forEach(regionCode => {
+        const regionPaslon = paslonData[regionCode];
+        if (!regionPaslon) return;
+
+        Object.keys(regionPaslon).forEach(paslonId => {
+          const candidate = regionPaslon[paslonId];
+          const candidateDiv = document.createElement('div');
+          candidateDiv.className = 'bg-gray-50 p-4 rounded-lg';
+          candidateDiv.innerHTML = `
+            <div class="flex items-center space-x-3">
+              <div class="w-4 h-4 rounded-full" style="background-color: ${candidate.warna}"></div>
+              <div>
+                <div class="font-medium">${candidate.nama}</div>
+                <div class="text-sm text-gray-500">Nomor Urut: ${candidate.nomor_urut}</div>
+              </div>
+            </div>
+          `;
+          candidatesGrid.appendChild(candidateDiv);
+        });
+      });
+    }
+
+    // Event listener untuk dropdown level 1
+    document.getElementById('dropdownLevel1').addEventListener('change', function(e) {
+      const provinceCode = this.value;
+      
+      document.getElementById('level2Container').classList.add('hidden');
+      document.getElementById('results').classList.add('hidden');
+      
+      if (provinceCode) {
+        loadLevel2(provinceCode);
+        loadPaslonDataAndResults(provinceCode);
+      }
+    });
+
+    // Inisialisasi aplikasi
+    document.addEventListener('DOMContentLoaded', loadLevel1);
+  </script>
+</body>
+</html>
